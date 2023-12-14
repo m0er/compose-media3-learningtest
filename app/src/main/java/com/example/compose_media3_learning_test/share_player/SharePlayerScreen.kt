@@ -9,9 +9,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -33,7 +33,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.children
 import androidx.lifecycle.Lifecycle
@@ -56,9 +55,6 @@ import com.example.compose_media3_learning_test.data.Video
 fun SharePlayerScreen(videos: List<Video>) {
     val lazyListState = rememberLazyListState()
     // play the video on the first visible item in the list
-    val focusIndex by remember {
-        derivedStateOf { lazyListState.firstVisibleItemIndex }
-    }
     val pagerState = rememberPagerState {
         videos.size
     }
@@ -90,13 +86,12 @@ fun SharePlayerScreen(videos: List<Video>) {
 
     Log.d("foobar", "라이프사이클 이벤트 >> $lifecycleEvent")
 
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
+    LazyColumn(modifier = Modifier.fillMaxSize(), state = lazyListState) {
         item {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(330.dp)
+                    .aspectRatio(16 / 9f)
                     .clipToBounds()
                     .background(Color.LightGray)
             ) { page ->
@@ -149,6 +144,23 @@ private fun SharePlayerItem(
     ) {
         val context = LocalContext.current
 
+        // TODO: 플레이어 release 한 후 플래그를 변경해 보면?
+        var playerReleased by remember {
+            mutableStateOf(false)
+        }
+        var player: ExoPlayer = remember(key1 = playerReleased) {
+            if (playerReleased) {
+                playerReleased = false
+                return@remember ExoPlayer.Builder(context).build().apply {
+                    repeatMode = Player.REPEAT_MODE_ONE
+                    videoScalingMode = C.VIDEO_SCALING_MODE_DEFAULT
+                    playWhenReady = true
+                }
+            } else {
+                exoPlayer
+            }
+        }
+
         LaunchedEffect(video.url) {
             val videoUri = Uri.parse(video.url)
             val dataSourceFactory: DataSource.Factory = DefaultDataSource.Factory(
@@ -157,9 +169,8 @@ private fun SharePlayerItem(
             )
             val source = ProgressiveMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(videoUri))
-            exoPlayer.setMediaSource(source)
-            exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
+            player.setMediaSource(source)
+            player.prepare()
             Log.d("foobar", "비디오 아이템[$page] LaunchedEffect >> exoPlayer.prepare()")
         }
 
@@ -173,7 +184,7 @@ private fun SharePlayerItem(
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
 
-                    player = exoPlayer
+                    this.player = player
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -201,7 +212,8 @@ private fun SharePlayerItem(
         DisposableEffect(key1 = video.url) {
             onDispose {
                 Log.d("foobar", "비디오 아이템[$page] onDispose")
-                exoPlayer.stop()
+                player.release()
+                playerReleased = true
             }
         }
     }
