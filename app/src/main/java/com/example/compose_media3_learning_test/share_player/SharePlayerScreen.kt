@@ -9,9 +9,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -33,18 +32,15 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.children
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -56,9 +52,6 @@ import com.example.compose_media3_learning_test.data.Video
 fun SharePlayerScreen(videos: List<Video>) {
     val lazyListState = rememberLazyListState()
     // play the video on the first visible item in the list
-    val focusIndex by remember {
-        derivedStateOf { lazyListState.firstVisibleItemIndex }
-    }
     val pagerState = rememberPagerState {
         videos.size
     }
@@ -79,24 +72,15 @@ fun SharePlayerScreen(videos: List<Video>) {
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
-    val context = LocalContext.current
-    val exoPlayer: ExoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            repeatMode = Player.REPEAT_MODE_ONE
-            videoScalingMode = C.VIDEO_SCALING_MODE_DEFAULT
-            playWhenReady = true
-        }
-    }
 
     Log.d("foobar", "라이프사이클 이벤트 >> $lifecycleEvent")
 
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
+    LazyColumn(modifier = Modifier.fillMaxSize(), state = lazyListState) {
         item {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(330.dp)
+                    .aspectRatio(16 / 9f)
                     .clipToBounds()
                     .background(Color.LightGray)
             ) { page ->
@@ -109,18 +93,19 @@ fun SharePlayerScreen(videos: List<Video>) {
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                if (page == currentIndex) {
-                    PlayerListener(player = exoPlayer, key = videos[page].url) { event ->
+                if (page == currentIndex && lifecycleEvent == Lifecycle.Event.ON_RESUME) {
+                    PlayerListener(
+                        player = ExoPlayerHolder.get(LocalContext.current),
+                        key = videos[page].url
+                    ) { event ->
                         if (event == Player.EVENT_RENDERED_FIRST_FRAME) {
                             showPlayer = true
                         }
                     }
-                    Log.d("foobar", "video![$page]")
                     SharePlayerItem(
                         video = videos[page],
                         page = page,
                         isForeground = lifecycleEvent != Lifecycle.Event.ON_STOP,
-                        exoPlayer = exoPlayer
                     )
                 }
             }
@@ -139,8 +124,7 @@ fun SharePlayerScreen(videos: List<Video>) {
 private fun SharePlayerItem(
     video: Video,
     page: Int,
-    isForeground: Boolean,
-    exoPlayer: ExoPlayer
+    isForeground: Boolean
 ) {
     Box(
         modifier = Modifier
@@ -148,6 +132,11 @@ private fun SharePlayerItem(
             .background(Color.Black)
     ) {
         val context = LocalContext.current
+
+        val player = remember(ExoPlayerHolder.isReleased()) {
+            Log.d("foobar", "비디오 플레이어 생성!")
+            ExoPlayerHolder.get(context)
+        }
 
         LaunchedEffect(video.url) {
             val videoUri = Uri.parse(video.url)
@@ -157,9 +146,8 @@ private fun SharePlayerItem(
             )
             val source = ProgressiveMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(videoUri))
-            exoPlayer.setMediaSource(source)
-            exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
+            player.setMediaSource(source)
+            player.prepare()
             Log.d("foobar", "비디오 아이템[$page] LaunchedEffect >> exoPlayer.prepare()")
         }
 
@@ -173,7 +161,7 @@ private fun SharePlayerItem(
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
 
-                    player = exoPlayer
+                    this.player = player
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -188,7 +176,10 @@ private fun SharePlayerItem(
 
                 (it.children.iterator().next() as AspectRatioFrameLayout).setAspectRatio(9 / 16f)
 
-                it.player?.playWhenReady = isForeground
+                if (!isForeground) {
+                    it.player = null
+                    ExoPlayerHolder.release()
+                }
             }
         )
 
@@ -201,7 +192,7 @@ private fun SharePlayerItem(
         DisposableEffect(key1 = video.url) {
             onDispose {
                 Log.d("foobar", "비디오 아이템[$page] onDispose")
-                exoPlayer.stop()
+                ExoPlayerHolder.get(context).stop()
             }
         }
     }
